@@ -13,42 +13,66 @@ const PORT = 3000;
 // Setup JSON body parsing structures
 app.use(express.json());
 
+// Clean environment values safely (removes wrapping quotes, brackets, parentheses, spaces)
+const cleanValue = (val: string): string => {
+  if (!val) return "";
+  return val
+    .trim()
+    .replace(/^["'(\s]+|["')\s]+$/g, "") // Strip prefix and suffix quotes, parentheses, and spaces
+    .trim();
+};
+
 // Google OAuth 2.0 Auth URL Generation Endpoint
 app.get("/api/auth/google/url", (req, res) => {
-  const clientOrigin = (req.query.origin as string) || "https://ais-pre-7hirokhrudwaql4i3udrj4-582044349376.asia-southeast1.run.app";
-  const redirectUri = `${clientOrigin}/auth/callback`;
+  try {
+    const clientOrigin = (req.query.origin as string) || "https://ais-pre-7hirokhrudwaql4i3udrj4-582044349376.asia-southeast1.run.app";
+    const redirectUri = `${clientOrigin}/auth/callback`;
 
-  const clientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
-  const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || "").trim();
+    const rawClientId = process.env.GOOGLE_CLIENT_ID || "";
+    const rawClientSecret = process.env.GOOGLE_CLIENT_SECRET || "";
 
-  const isRealGoogleId = 
-    clientId && 
-    clientSecret && 
-    clientId.endsWith(".apps.googleusercontent.com") && 
-    !clientId.includes("YOUR") && 
-    !clientId.includes("MY_");
+    const clientId = cleanValue(rawClientId);
+    const clientSecret = cleanValue(rawClientSecret);
 
-  if (!isRealGoogleId) {
-    // Return custom Google Account Chooser Sandbox URL for beautiful live testing when env keys are absent
-    return res.json({ 
-      url: `${clientOrigin}/api/auth/google/sandbox?origin=${encodeURIComponent(clientOrigin)}`,
-      configured: false 
+    console.log(`[OAuth Debug] Initiating handshake generation. Raw ID length: ${rawClientId.length}, Clean ID length: ${clientId.length}`);
+
+    const isRealGoogleId = 
+      clientId && 
+      clientSecret && 
+      clientId.endsWith(".apps.googleusercontent.com") && 
+      !clientId.toLowerCase().includes("your") && 
+      !clientId.toLowerCase().includes("my_");
+
+    console.log(`[OAuth Debug] isRealGoogleId evaluation: ${isRealGoogleId}`);
+
+    if (!isRealGoogleId) {
+      const sandboxUrl = `${clientOrigin}/api/auth/google/sandbox?origin=${encodeURIComponent(clientOrigin)}`;
+      console.log(`[OAuth Debug] Rendering offline chooser sandbox URL: ${sandboxUrl}`);
+      return res.json({ 
+        url: sandboxUrl,
+        configured: false 
+      });
+    }
+
+    // Generate Google API Auth endpoint URI coordinates
+    const googleAuthUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    googleAuthUrl.searchParams.append("client_id", clientId);
+    googleAuthUrl.searchParams.append("redirect_uri", redirectUri);
+    googleAuthUrl.searchParams.append("response_type", "code");
+    googleAuthUrl.searchParams.append("scope", "openid email profile");
+    googleAuthUrl.searchParams.append("access_type", "offline");
+    googleAuthUrl.searchParams.append("prompt", "select_account");
+
+    console.log(`[OAuth Debug] Google Live URL generated: ${googleAuthUrl.toString()}`);
+
+    return res.json({
+      url: googleAuthUrl.toString(),
+      configured: true
     });
+  } catch (error: any) {
+    console.error("❌ Error in /api/auth/google/url handler:", error);
+    return res.status(500).json({ error: error.message || "Internal auth config error" });
   }
-
-  // Generate Google API Auth endpoint URI coordinates
-  const googleAuthUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  googleAuthUrl.searchParams.append("client_id", clientId);
-  googleAuthUrl.searchParams.append("redirect_uri", redirectUri);
-  googleAuthUrl.searchParams.append("response_type", "code");
-  googleAuthUrl.searchParams.append("scope", "openid email profile");
-  googleAuthUrl.searchParams.append("access_type", "offline");
-  googleAuthUrl.searchParams.append("prompt", "select_account");
-
-  return res.json({
-    url: googleAuthUrl.toString(),
-    configured: true
-  });
 });
 
 // Google OAuth 2.0 Login Callback Handler
@@ -67,8 +91,8 @@ app.get(["/auth/callback", "/auth/callback/"], async (req, res) => {
     `);
   }
 
-  const clientId = process.env.GOOGLE_CLIENT_ID || "";
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET || "";
+  const clientId = cleanValue(process.env.GOOGLE_CLIENT_ID || "");
+  const clientSecret = cleanValue(process.env.GOOGLE_CLIENT_SECRET || "");
   const redirectUri = `${clientOrigin}/auth/callback`;
 
   try {
