@@ -372,7 +372,7 @@ app.get("/api/auth/google/sandbox", (req, res) => {
                   avatarUrl: picture || "",
                   phone: ""
                 }
-              }, '${clientOrigin}');
+              }, '*');
               window.close();
             } else {
               alert('Bypass parent target connection disconnected.');

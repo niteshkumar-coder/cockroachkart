@@ -9,8 +9,8 @@ interface AuthPageProps {
 }
 
 export default function AuthPage({ setScreen, onLoginSuccess }: AuthPageProps) {
-  // Authentication status view state: 'entry' (SSO Trigger) | 'profile' (Step 2 configuration for new accounts only)
-  const [step, setStep] = useState<'entry' | 'profile'>('entry');
+  // Authentication status view state: 'entry' (SSO Trigger) | 'profile' (Step 2 configuration for new accounts only) | 'sandbox'
+  const [step, setStep] = useState<'entry' | 'profile' | 'sandbox'>('entry');
   
   // Custom states for newly registering accounts
   const [name, setName] = useState('');
@@ -97,10 +97,41 @@ export default function AuthPage({ setScreen, onLoginSuccess }: AuthPageProps) {
     localStorage.setItem('survivor_profiles', JSON.stringify(updated));
   };
 
-  // Google SSO Initiator
+  // Google SSO Initiator with Popup-blocker bypass technique
   const handleGoogleSignInByPopup = async () => {
     setAuthError('');
     setConnecting(true);
+
+    // 1. Open popup immediately inside the synchronous click handler event context
+    const popupWidth = 500;
+    const popupHeight = 650;
+    const leftCoord = window.screen.width / 2 - popupWidth / 2;
+    const topCoord = window.screen.height / 2 - popupHeight / 2;
+
+    const ssoPopup = window.open(
+      'about:blank',
+      'google_oauth_sso_portal',
+      `width=${popupWidth},height=${popupHeight},top=${topCoord},left=${leftCoord},scrollbars=yes,status=no`
+    );
+
+    if (!ssoPopup) {
+      setConnecting(false);
+      setAuthError("Popup blocked. Please configure popup exceptions in your browser or click 'Bypass' below to login instantly.");
+      return;
+    }
+
+    try {
+      ssoPopup.document.write(`
+        <html style="background:#0D0D0D;color:#FFF;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+          <div style="text-align:center;">
+            <h3 style="color:#F59E0B;margin-bottom:8px;">SSO Handshake</h3>
+            <p style="font-size:11px;color:#888;margin:0;">Connecting securely to Google choose account portal...</p>
+          </div>
+        </html>
+      `);
+    } catch (e) {
+      // safe fallback on cross-origin locks
+    }
 
     try {
       const clientOrigin = window.location.origin;
@@ -111,24 +142,12 @@ export default function AuthPage({ setScreen, onLoginSuccess }: AuthPageProps) {
       }
 
       const { url } = await response.json();
+      
+      // Update location of already-opened popup window
+      ssoPopup.location.href = url;
 
-      // Open OAuth account chooser popup directly (handles sandboxed iframe restrictions cleanly)
-      const popupWidth = 500;
-      const popupHeight = 600;
-      const leftCoord = window.screen.width / 2 - popupWidth / 2;
-      const topCoord = window.screen.height / 2 - popupHeight / 2;
-
-      const ssoPopup = window.open(
-        url,
-        'google_oauth_sso_portal',
-        `width=${popupWidth},height=${popupHeight},top=${topCoord},left=${leftCoord},scrollbars=yes,status=no`
-      );
-
-      if (!ssoPopup) {
-        setConnecting(false);
-        setAuthError("Popup blocked by window. Please grant permissions above to connect Google SSO.");
-      }
     } catch (err: any) {
+      if (ssoPopup) ssoPopup.close();
       setConnecting(false);
       setAuthError(err.message || "Failed to establish bridge connection with Google authentication server.");
     }
@@ -237,21 +256,7 @@ export default function AuthPage({ setScreen, onLoginSuccess }: AuthPageProps) {
                 <button
                   type="button"
                   onClick={() => {
-                    const clientOrigin = window.location.origin;
-                    const sandboxUrl = `${clientOrigin}/api/auth/google/sandbox?origin=${encodeURIComponent(clientOrigin)}`;
-                    const popupWidth = 500;
-                    const popupHeight = 600;
-                    const leftCoord = window.screen.width / 2 - popupWidth / 2;
-                    const topCoord = window.screen.height / 2 - popupHeight / 2;
-                    
-                    const ssoPopup = window.open(
-                      sandboxUrl,
-                      'google_oauth_sso_portal',
-                      `width=${popupWidth},height=${popupHeight},top=${topCoord},left=${leftCoord},scrollbars=yes,status=no`
-                    );
-                    if (!ssoPopup) {
-                      setAuthError("Popup blocked. Please allow popups to launch test sandbox.");
-                    }
+                    setStep('sandbox');
                   }}
                   className="w-full flex items-center justify-center gap-1.5 border border-dashed border-amber-500/25 bg-amber-500/5 hover:bg-amber-500/10 rounded-xl py-3 text-xs font-mono font-black text-amber-500 transition-all cursor-pointer hover:border-amber-500/50 uppercase tracking-widest active:scale-[0.99]"
                 >
@@ -262,6 +267,137 @@ export default function AuthPage({ setScreen, onLoginSuccess }: AuthPageProps) {
               <div className="pt-2 text-[10px] text-zinc-500 text-center font-mono">
                 Clicking above launches standard Google OAuth 2.0 account selectors in a secure popup sheet.
               </div>
+            </motion.div>
+          )}
+
+          {step === 'sandbox' && (
+            /* --- INLINE DEVELOPER TESTING SANDBOX SUITE (100% RELIABLE) --- */
+            <motion.div
+              key="sandbox-suite"
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.98 }}
+              className="space-y-4 text-left font-mono"
+            >
+              <div className="text-center space-y-1 pb-2 border-b border-neutral-900">
+                <span className="text-2xl select-none">🧪</span>
+                <h2 className="text-sm tracking-widest text-amber-500 uppercase font-black">
+                  Sandbox Testing Suite
+                </h2>
+                <p className="text-[10px] text-zinc-400 leading-relaxed">
+                  Your Google login is running in a local developer sandbox. Select a mock profile to log in instantly:
+                </p>
+              </div>
+
+              {/* Sample standard accounts */}
+              <div className="space-y-2 mt-4">
+                <div 
+                  onClick={() => {
+                    const profile = {
+                      name: "Nitesh Kumar",
+                      email: "niteshkumar9128ku@gmail.com",
+                      phone: "Sandbox Verified",
+                      avatarUrl: ""
+                    };
+                    onLoginSuccess(profile);
+                  }}
+                  className="bg-[#1C1D20] hover:bg-[#252528] border border-neutral-800 hover:border-amber-500/40 rounded-xl p-3 flex items-center gap-3 cursor-pointer transition-all active:scale-[0.99]"
+                >
+                  <div className="w-8 h-8 rounded-full bg-amber-500 text-black flex items-center justify-center font-bold text-xs shrink-0 font-sans">
+                    N
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-white font-black">Nitesh Kumar</p>
+                    <p className="text-[10px] text-zinc-500 truncate">niteshkumar9128ku@gmail.com</p>
+                  </div>
+                </div>
+
+                <div 
+                  onClick={() => {
+                    const profile = {
+                      name: "Rahul Sharma",
+                      email: "rahulsharma@gmail.com",
+                      phone: "Sandbox Verified",
+                      avatarUrl: ""
+                    };
+                    onLoginSuccess(profile);
+                  }}
+                  className="bg-[#1C1D20] hover:bg-[#252528] border border-neutral-800 hover:border-amber-500/40 rounded-xl p-3 flex items-center gap-3 cursor-pointer transition-all active:scale-[0.99]"
+                >
+                  <div className="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center font-bold text-xs shrink-0 font-sans">
+                    R
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-white font-black">Rahul Sharma</p>
+                    <p className="text-[10px] text-zinc-500 truncate">rahulsharma@gmail.com</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="relative flex py-2 items-center">
+                <div className="flex-grow border-t border-neutral-900"></div>
+                <span className="flex-shrink mx-2 text-[8px] text-zinc-500 uppercase">Or custom mock details</span>
+                <div className="flex-grow border-t border-neutral-900"></div>
+              </div>
+
+              {/* Custom login form */}
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const targetName = (e.currentTarget.elements.namedItem('sandboxName') as HTMLInputElement).value.trim();
+                  const targetEmail = (e.currentTarget.elements.namedItem('sandboxEmail') as HTMLInputElement).value.trim();
+                  if (!targetName || !targetEmail) return;
+                  onLoginSuccess({
+                    name: targetName,
+                    email: targetEmail.toLowerCase(),
+                    phone: "Sandbox Verified",
+                    avatarUrl: ""
+                  });
+                }}
+                className="space-y-3"
+              >
+                <div>
+                  <label className="block text-[9px] text-zinc-500 uppercase font-bold mb-1">
+                    Full Name
+                  </label>
+                  <input
+                    type="text"
+                    name="sandboxName"
+                    required
+                    placeholder="e.g. Nitesh Kumar"
+                    className="w-full rounded-lg bg-[#1C1C1E] border border-neutral-800 px-3 py-2 text-xs text-white focus:border-amber-400 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[9px] text-zinc-500 uppercase font-bold mb-1">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    name="sandboxEmail"
+                    required
+                    placeholder="e.g. user@gmail.com"
+                    className="w-full rounded-lg bg-[#1C1C1E] border border-neutral-800 px-3 py-2 text-xs text-white focus:border-amber-400 focus:outline-none"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-amber-500 hover:bg-amber-600 rounded-xl py-3 text-xs font-black text-black transition-all cursor-pointer uppercase tracking-widest active:scale-[0.99] font-mono"
+                >
+                  Confirm Mock Connection
+                </button>
+              </form>
+
+              {/* Go back button */}
+              <button
+                type="button"
+                onClick={() => setStep('entry')}
+                className="w-full text-center text-[10px] text-zinc-500 hover:text-amber-500 underline uppercase pt-2"
+              >
+                ← Back to standard Google login
+              </button>
             </motion.div>
           )}
 
